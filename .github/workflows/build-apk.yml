@@ -1,0 +1,69 @@
+name: Build Truth or Dare APK
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Install Capacitor and create Android project
+        run: |
+          npm install
+          npx cap add android
+      - name: Set app label and create launcher icon
+        run: |
+          sed -i 's/<string name="app_name">.*<\/string>/<string name="app_name">Truth or Dare<\/string>/' android/app/src/main/res/values/strings.xml || true
+          python3 -m pip install pillow
+          mkdir -p android/app/src/main/res
+          python3 - <<'PY'
+          from PIL import Image, ImageDraw, ImageFont
+          import os
+          sizes={'mdpi':48,'hdpi':72,'xhdpi':96,'xxhdpi':144,'xxxhdpi':192}
+          for density,size in sizes.items():
+              d=f'android/app/src/main/res/mipmap-{density}'
+              os.makedirs(d,exist_ok=True)
+              im=Image.new('RGBA',(size,size),(16,17,20,255))
+              dr=ImageDraw.Draw(im)
+              # Two clean, colourful cards
+              dr.rounded_rectangle((size*.12,size*.22,size*.57,size*.80),radius=size*.07,fill=(82,79,220,255),outline=(255,255,255,255),width=max(1,size//32))
+              dr.rounded_rectangle((size*.43,size*.14,size*.88,size*.72),radius=size*.07,fill=(226,75,115,255),outline=(255,255,255,255),width=max(1,size//32))
+              try: font=ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',int(size*.42))
+              except: font=Image.load_default()
+              for ch,cx,cy in [('?',size*.345,size*.40),('!',size*.655,size*.33)]:
+                  box=dr.textbbox((0,0),ch,font=font,stroke_width=0)
+                  dr.text((cx-(box[2]-box[0])/2,cy-(box[3]-box[1])/2),ch,font=font,fill='white')
+              im.save(f'{d}/ic_launcher.png')
+              im.save(f'{d}/ic_launcher_round.png')
+          PY
+          cat > android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml <<'EOF'
+          <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+            <background android:drawable="@color/ic_launcher_background"/>
+            <foreground android:drawable="@mipmap/ic_launcher"/>
+          </adaptive-icon>
+          EOF
+          cat > android/app/src/main/res/values/ic_launcher_background.xml <<'EOF'
+          <resources><color name="ic_launcher_background">#101114</color></resources>
+          EOF
+      - name: Copy web app and build APK
+        run: |
+          npx cap copy android
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Truth-or-Dare-APK
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
